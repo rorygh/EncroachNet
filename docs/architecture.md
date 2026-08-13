@@ -13,7 +13,7 @@ RGB images {I_k}           (drone frames, known intrinsics K_k)
 2D Semantic Segmentation    per-pixel class probs p_k(u,v) ∈ Δ³  {bg, vegetation, powerline}
       │
       ▼
-Camera poses {K_k, R_k, t_k}   (from LiDAR-flight direct georeferencing, or COLMAP SfM)
+Camera poses {K_k, R_k, t_k}   (from LiDAR-flight direct georeferencing, or ODM SfM/MVS)
       │
       ▼
 Multi-view Backprojection    per 3D point x_i: fuse p_k(π(x_i)) over all visible k → label ŷ_i
@@ -77,6 +77,8 @@ Two supported paths, selected per-flight based on what's available:
 
 **Path B — RGB-only**: run [OpenDroneMap (ODM)](https://github.com/OpenDroneMap/ODM) rather than hand-chaining raw COLMAP. ODM is purpose-built for exactly this kind of multi-image drone-corridor capture — its pipeline is OpenSfM (poses) → OpenMVS (dense reconstruction/depth maps) → orthophoto/DSM — whereas the COLMAP pipeline already on disk at `C:\rory\scripts\LogMotion` (`01_extract_frames.py` → `02_colmap_sparse.py` → `03_dense.py`) has only been exercised on video/ground-level scenes and would need adaptation for aerial multi-view geometry. ODM exposes both artifacts Stage 3 needs directly: `shots.geojson` (per-image position + orientation → `R, t`) and per-image OpenMVS depth maps (→ `depth_map` in `core/backproject.py`'s `CameraPose`). It also produces an orthomosaic/DSM as a byproduct, which folds the earlier "pre-built orthomosaic + DSM" option into the same tool rather than a separate path. Expect MVS (via either tool) to poorly reconstruct or entirely omit wire points (thin, low-texture, often sub-pixel) — this is exactly why Stage 5's catenary fit does not trust raw point density and instead fits a parametric model through whatever sparse/noisy wire points do exist.
 
+**Validation data for this stage**: [VEPL](https://zenodo.org/records/7800234) ships real orthomosaics paired with DSMs in the exact target taxonomy — the dataset to test the orthomosaic+DSM 2D→3D lift on before relying on it for a client flight (see `docs/datasets.md`).
+
 ---
 
 > **⚠ NEEDS REVIEW — Stage 3 onward.** Everything from here down (multi-view backprojection, optional 3D refinement, catenary fitting, clearance computation) is candidate design, not yet confirmed. Flagging per Rory's request before picking this back up.
@@ -109,6 +111,8 @@ s_i(c) = Σ_k visible(i, k) · p_k,c(u_i,k)
 ```
 
 Points with no visible camera (`Σ_k visible(i,k) = 0`) are left unlabeled and excluded from downstream steps.
+
+**Validation data for this stage**: [DDOS](https://huggingface.co/datasets/benediktkol/DDOS) provides ground-truth depth and segmentation for every frame of real sequential flight trajectories — run ODM on its RGB frames, backproject with `core/backproject.py`, and check the result against DDOS's own GT before trusting this stage on real client flights (see `docs/datasets.md`).
 
 ---
 

@@ -32,7 +32,7 @@ RGB images
 │                      │  + skeleton-topology term on the powerline class
 └──────────┬───────────┘
            │        Camera poses: LiDAR-flight direct georeferencing,
-           │        or COLMAP SfM/MVS (reusing LogMotion pipeline)
+           │        or ODM SfM/MVS (OpenDroneMap)
            ▼
 ┌─────────────────────┐
 │ Multi-view           │  Visibility-checked backprojection + label voting
