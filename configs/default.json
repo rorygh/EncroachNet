@@ -1,12 +1,12 @@
 {
   "data": {
     "root": "/workspace/data/encroachnet",
-    "image_size": [1024, 1024],
+    "image_size": [512, 512],
     "val_fraction": 0.15,
     "num_workers": 8
   },
   "model2d": {
-    "backbone": "segformer_b2",
+    "backbone": "hrnet_w32",
     "pretrained": true,
     "num_classes": 4,
     "in_channels": 3

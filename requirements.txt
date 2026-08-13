@@ -5,7 +5,7 @@ tensorboard
 numpy
 scipy
 opencv-python
-transformers
+transformers==4.46.3  # pinned: transformers>=4.50 requires torch>=2.5, but RunPod base image ships torch 2.4.1+cu124
 timm
 laspy[lazrs]
 open3d
@@ -14,3 +14,4 @@ scikit-image
 scikit-learn
 huggingface_hub
 tqdm
+nvidia-ml-py  # torch.cuda.utilization() for GPU-util logging in train2d.py

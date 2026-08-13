@@ -14,14 +14,27 @@ import os
 
 import pytorch_lightning as pl
 import torch
+import torchvision.utils as vutils
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import ConcatDataset, DataLoader
+from torchmetrics.classification import MulticlassJaccardIndex
 
 from core.dataset2d import SegmentationDataset
 from core.losses import CombinedSegmentationLoss
 from core.model2d import build_model
-from core import CLASS_NAMES
+from core import CLASS_NAMES, CLASS_COLORS, IGNORE_INDEX
+
+
+def _colorize_mask(mask: torch.Tensor) -> torch.Tensor:
+    """(H, W) class-index mask -> (3, H, W) float RGB in [0, 1], using classes.json's class_colors."""
+    palette = torch.tensor(
+        [[int(hexcolor[i : i + 2], 16) for i in (1, 3, 5)] for hexcolor in CLASS_COLORS],
+        dtype=torch.float32,
+    ) / 255.0
+    rgb = palette[mask.clamp(min=0)]
+    rgb[mask == IGNORE_INDEX] = 0.0
+    return rgb.permute(2, 0, 1)
 
 
 class EncroachNet2DModule(pl.LightningModule):
@@ -39,19 +52,54 @@ class EncroachNet2DModule(pl.LightningModule):
             topo_class=cfg["loss"]["topo_class"],
             num_classes=cfg["model2d"]["num_classes"],
         )
+        # average=None -> per-class IoU; mIoU is their mean, logged separately below so a
+        # class absent from a given run's ground truth (e.g. vegetation when --sources ttpla)
+        # is visible on its own rather than silently blended into one number.
+        self.val_iou = MulticlassJaccardIndex(
+            num_classes=cfg["model2d"]["num_classes"], ignore_index=IGNORE_INDEX, average=None
+        )
 
-    def _step(self, batch: dict, stage: str) -> torch.Tensor:
+    def _step(self, batch: dict, stage: str) -> tuple[torch.Tensor, torch.Tensor]:
         logits = self.model(batch["image"])
         losses = self.criterion(logits, batch["mask"])
         for k, v in losses.items():
             self.log(f"{stage}/{k}", v, prog_bar=(k == "loss"), batch_size=batch["image"].shape[0])
-        return losses["loss"]
+        return losses["loss"], logits
 
     def training_step(self, batch, _):
-        return self._step(batch, "train")
+        loss, _ = self._step(batch, "train")
+        if torch.cuda.is_available():
+            self.log("train/gpu_util_pct", float(torch.cuda.utilization()))
+            self.log("train/gpu_mem_gb", torch.cuda.memory_allocated() / 1e9)
+        return loss
 
-    def validation_step(self, batch, _):
-        self._step(batch, "val")
+    def validation_step(self, batch, batch_idx):
+        loss, logits = self._step(batch, "val")
+        self.val_iou.update(logits.argmax(dim=1), batch["mask"])
+        if batch_idx == 0:
+            self._log_val_images(batch, logits)
+        return loss
+
+    def on_validation_epoch_end(self) -> None:
+        per_class_iou = self.val_iou.compute()
+        for name, iou in zip(CLASS_NAMES, per_class_iou):
+            self.log(f"val/iou_{name}", iou)
+        self.log("val/miou", per_class_iou.mean())
+        self.val_iou.reset()
+
+    def _log_val_images(self, batch: dict, logits: torch.Tensor, n: int = 4) -> None:
+        preds = logits.argmax(dim=1)
+        n = min(n, batch["image"].shape[0])
+        rows = [
+            torch.cat([
+                batch["image"][i].cpu(),
+                _colorize_mask(batch["mask"][i].cpu()),
+                _colorize_mask(preds[i].cpu()),
+            ], dim=2)  # RGB | ground truth | prediction, side by side
+            for i in range(n)
+        ]
+        grid = vutils.make_grid(rows, nrow=1)
+        self.logger.experiment.add_image("val/predictions", grid, self.current_epoch)
 
     def configure_optimizers(self):
         opt = torch.optim.AdamW(
@@ -80,6 +128,8 @@ def parse_args():
 
 
 def main():
+    torch.set_float32_matmul_precision("high")  # enable tensor cores (RTX Ada / Ampere+)
+
     args = parse_args()
 
     with open(args.config) as f:
@@ -114,19 +164,23 @@ def main():
 
     module = EncroachNet2DModule(cfg)
 
+    # Name runs by backbone + source datasets so different experiments log to separate
+    # TensorBoard curves / checkpoint dirs but with identical metric tags -- directly comparable.
+    run_name = f"encroachnet_2d_{cfg['model2d']['backbone']}_{'-'.join(sources)}"
+
     checkpoint_cb = ModelCheckpoint(
-        dirpath="checkpoints/",
-        filename="encroachnet_2d_{epoch:03d}",
+        dirpath=f"checkpoints/{run_name}/",
+        filename="{epoch:03d}",
         monitor=cfg["training"]["checkpoint_metric"],
         mode=cfg["training"]["checkpoint_mode"],
         save_last=True,
         save_top_k=3,
     )
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    logger = TensorBoardLogger("runs/", name="encroachnet_2d")
+    logger = TensorBoardLogger("runs/", name=run_name)
 
     precision = "16-mixed" if cfg["training"]["mixed_precision"] else "32"
-    ckpt_path = "checkpoints/last.ckpt" if args.resume else None
+    ckpt_path = f"checkpoints/{run_name}/last.ckpt" if args.resume else None
 
     trainer = pl.Trainer(
         max_epochs=cfg["training"]["max_epochs"],

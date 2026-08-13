@@ -19,6 +19,27 @@ The vegetation class is not the hard part of this problem — any competent aeri
 | UNetFormer / BANet | CNN-transformer hybrids purpose-built for remote-sensing scenes | BANet reports 64.6% mIoU on UAVid |
 | **HRNet / HRNetV2** | Maintains a full-resolution branch in parallel with downsampled branches through the *entire* network, rather than downsample-then-upsample | Literature specifically credits this design with better edge/tiny-object preservation **without any post-processing** — the standout candidate for the powerline class given its structural resemblance to other thin-object problems (pose estimation keypoints, pipe-corrosion segmentation) |
 
+### TTPLA benchmark results (cable-only binary segmentation, the de facto standard protocol)
+
+The original TTPLA paper only benchmarks YOLACT instance segmentation (ResNet-50/101, best avg mask AP 15.72%/14.88% at 700×700 — see `docs/datasets.md`). Almost every follow-up paper instead collapses TTPLA to binary cable-vs-background semantic segmentation and drops the tower classes entirely, so cross-paper IoU/F1 is the closest thing to a standard leaderboard (no Papers With Code entry exists — PWC was retired in 2025). Caveat: exact metric definitions vary slightly per paper (some "mIoU" figures average background+cable rather than reporting cable IoU alone) — treat as directionally comparable, not exact.
+
+| Model | Architecture | TTPLA cable IoU | F1 | Params | Notes |
+|---|---|---|---|---|---|
+| U-Net | CNN encoder-decoder | 72.21% | 82.11% | — | Common baseline across papers |
+| **SegFormer-B2** | MiT transformer encoder + MLP decoder | **71.59%** | 82.51% | 27.5M | **The exact backbone `configs/default.json` currently trains** (DUFormer's comparison table) |
+| PSPNet | Pyramid pooling CNN | 70.59% | 81.16% | — | |
+| DeepLab | Atrous/dilated CNN | 70.48% | 81.03% | — | |
+| PLGAN | GAN (encoder + PL-decoder generator + Hough-space loss) | 53.3% | 68.7% | 14.9M | Lower than the plain CNN baselines it compares against on its own split — Hough-loss framing doesn't obviously help here |
+| PL-UNeXt | U-Net + edge-detail head + line-feature head | — | 70.6% | — | +1.9% F1 vs. prior SOTA at publication |
+| HRNet-OCR | HRNet + object-contextual representations | 73.43% | 83.91% | — | Best of DUFormer's baseline comparisons — consistent with `docs/sota.md`'s existing HRNetV2 recommendation below |
+| PL-UNet | U-Net + EfficientNetV2-S encoder + attention gate decoder | 79.98%* | — | 21.27M | 56.86 fps; *likely background+cable mean-IoU, not directly comparable to single-class figures above |
+| WGT-UNet | Wavelet-guided hybrid transformer (DWT subband attention) | 68.38% | 79.33% | — | ConvNeXt-backbone variant |
+| **DUFormer** | Hybrid CNN+Transformer, Power-Line-Aware Block, BiscSE attention | **74.44%** | **85.96%** | 28.51M | Best reported cable IoU found; 123.4 GFLOPs, 200.4ms latency (fastest of its comparison group) |
+
+None of these have public code/weights as of this survey. Two papers (CGISnet, AFENet) keep the tower classes and instance-segmentation task rather than collapsing to cable-only, but both are paywalled with no extractable numbers.
+
+**Takeaway for EncroachNet**: the current default backbone (SegFormer-B2) sits mid-pack on the one directly-comparable published benchmark — meaningfully behind HRNet-OCR and DUFormer, both of which win via architectural attention to thin/edge structure, which is exactly the axis `docs/sota.md`'s own recommendation (below) already flagged HRNetV2 for.
+
 ### Domain-specific powerline detectors and losses
 
 - **[TTPLA](https://arxiv.org/abs/2010.10032)** (Abdelfattah et al., 2020) — the founding dataset paper; establishes transmission-tower + power-line instance segmentation as a benchmark task; baseline models evaluated for detection, semantic, and instance segmentation.

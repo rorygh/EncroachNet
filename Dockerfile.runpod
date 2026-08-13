@@ -13,5 +13,10 @@ RUN uv pip install --system -r requirements.txt
 # Copy source
 COPY . .
 
+# TensorBoard (train2d.py logs to runs/ via TensorBoardLogger) -- expose the port here
+# for documentation; on RunPod it still needs to be added under the pod's
+# Expose HTTP Ports setting to actually be reachable.
+EXPOSE 6006
+
 # Default: drop into bash; training/inference launched manually
 CMD ["/bin/bash"]

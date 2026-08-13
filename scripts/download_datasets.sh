@@ -88,12 +88,20 @@ fi
 # ── Powerline datasets (scale/diversity supplement) ───────────────────────────
 
 if want powerline || want TTPLA; then
-    echo "[TTPLA] 1,100 images, 8,987 instances — transmission towers + power lines"
-    echo "  Source: https://github.com/R3ab/ttpla_dataset"
+    echo "[TTPLA] 1,234 images (905/109/220 train/val/test), Apache-2.0 — cable + 3 tower types"
+    echo "  Official source: https://github.com/R3ab/ttpla_dataset (Google Drive link in README --"
+    echo "  frequently hits Google's per-file quota: 'too many users have viewed or downloaded this file')."
+    echo "  Using the Dataset Ninja Supervisely-format mirror instead (same data, polygon annotations,"
+    echo "  not gated): https://datasetninja.com/ttpla"
     mkdir -p "$DATA_ROOT/TTPLA"
-    echo "  ⚠  Download requires accepting the GitHub repo's release/data terms;"
-    echo "     see https://github.com/R3ab/ttpla_dataset for the current download link."
-    echo "     Place extracted images/masks at: $DATA_ROOT/TTPLA/"
+    curl -sL "https://assets.supervisely.com/remote/eyJsaW5rIjogInMzOi8vc3VwZXJ2aXNlbHktZGF0YXNldHMvMTUyNl9UVFBMQS90dHBsYS1EYXRhc2V0TmluamEudGFyIiwgInNpZyI6ICJ1R3BKNWhoQWN2bUJta1RnM3Z0MlZ4Y3JlOUwvWEoyaFMvNVdCZkFaQjJVPSJ9?response-content-disposition=attachment%3B%20filename%3D%22ttpla-DatasetNinja.tar%22" \
+        -o "$DATA_ROOT/TTPLA/ttpla-DatasetNinja.tar" \
+        && tar -xf "$DATA_ROOT/TTPLA/ttpla-DatasetNinja.tar" -C "$DATA_ROOT/TTPLA" \
+        || echo "  ⚠  Mirror fetch failed -- signed URL may have expired; get a fresh one from the" \
+                "'Download' button at https://datasetninja.com/ttpla and re-run, or fall back to the" \
+                "GitHub README's Google Drive link once its quota resets."
+    echo "  TTPLA ships polygon annotations, not raster masks -- rasterize before training:"
+    echo "    python scripts/prepare_ttpla.py --raw $DATA_ROOT/TTPLA --out $DATA_ROOT/encroachnet/ttpla"
     echo
 fi
 

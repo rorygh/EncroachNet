@@ -34,6 +34,10 @@ Labeled 3D point cloud + georeferenced risk report
 
 Backbone: SegFormer or HRNetV2 (compare both — see `docs/sota.md` Part A). Output per-pixel class probabilities over `{background, vegetation, powerline}` (optionally `tower` as a 4th class).
 
+### Full-resolution inference (tiling)
+
+The model is trained on fixed-size crops (`configs/default.json`'s `data.image_size`, e.g. 512×512), but real drone frames run 4,000–8,000 px wide — far too large to fit in GPU memory in one forward pass, and at a scale where a thin wire looks nothing like what the model was trained on. `core/inference3d.py`'s `run_2d_segmentation` handles this with sliding-window tiled inference: overlapping `image_size`-sized windows (25% overlap by default) are run independently, then their softmax probability maps are averaged back into one full-resolution map, blending seams at tile boundaries rather than leaving hard edges. Tile size is read directly from the training config, so it always matches whatever resolution the active checkpoint was actually trained at.
+
 ### Class-imbalance loss (Focal Phi Loss family)
 
 Power-line pixels are ~1–5% of any given image. Standard focal loss:

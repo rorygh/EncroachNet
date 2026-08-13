@@ -28,7 +28,7 @@ EncroachNet/
 ├── train2d.py             # 2D segmentation training entry point
 ├── infer3d.py              # Full pipeline: images + poses -> labeled 3D + risk report
 ├── finetune2d.py           # Fine-tuning on client imagery
-├── setup-env.sh            # Conda environment bootstrap (run once)
+├── setup-env.sh            # uv-based environment bootstrap (run once)
 ├── Dockerfile.runpod       # RunPod deployment image
 ├── requirements.txt        # Python dependencies
 ├── classes.json            # Semantic class registry
@@ -43,7 +43,8 @@ EncroachNet/
 │   ├── catenary.py            # Conductor curve fitting + clearance computation
 │   └── inference3d.py         # End-to-end pipeline orchestration
 ├── scripts/
-│   └── download_datasets.sh  # Dataset download (run on RunPod, not locally)
+│   ├── download_datasets.sh  # Dataset download (run on RunPod, not locally)
+│   └── prepare_ttpla.py      # Rasterizes TTPLA's polygon annotations to mask PNGs
 ├── docs/
 │   ├── architecture.md       # Full mathematical architecture description
 │   ├── sota.md                # State-of-the-art model survey
@@ -59,8 +60,9 @@ EncroachNet/
 
 ```bash
 bash setup-env.sh
-conda activate encroachnet
 ```
+
+Installs into system Python via `uv` — no conda on the RunPod base image (see `setup-env.sh`).
 
 ### 2D Segmentation Training
 

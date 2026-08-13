@@ -23,20 +23,56 @@ class PipelineResult:
     risk_mask: np.ndarray | None = None
 
 
+def _tile_origins(size: int, tile: int, stride: int) -> list[int]:
+    """Sliding-window start coordinates along one axis, covering [0, size) with the
+    last tile flush against the far edge even when stride doesn't evenly divide size."""
+    if size <= tile:
+        return [0]
+    origins = list(range(0, size - tile + 1, stride))
+    if origins[-1] != size - tile:
+        origins.append(size - tile)
+    return origins
+
+
 @torch.no_grad()
-def run_2d_segmentation(model: torch.nn.Module, images: list[np.ndarray],
-                         device: str = "cuda") -> list[np.ndarray]:
+def _predict_tiled(model: torch.nn.Module, image: np.ndarray, device: str,
+                    tile: int, overlap: float) -> np.ndarray:
+    """Full-resolution drone frames (~4000-8000px) are both too large to fit in GPU
+    memory at once and too large-scale relative to what the model was trained on
+    (512x512 crops) -- feeding a whole frame in directly OOMs and, even if it fit,
+    would show the model wires at the wrong apparent scale. Standard fix: run the
+    model over overlapping tiles at training resolution and average the overlap
+    regions back into one full-size probability map, avoiding seams at tile borders.
+    """
+    h, w = image.shape[:2]
+    if h <= tile and w <= tile:
+        tensor = torch.from_numpy(image / 255.0).permute(2, 0, 1).float().unsqueeze(0).to(device)
+        return F.softmax(model(tensor), dim=1)[0].permute(1, 2, 0).cpu().numpy()
+
+    stride = max(1, int(tile * (1 - overlap)))
+    prob_sum, weight = None, np.zeros((h, w), dtype=np.float32)
+
+    for y in _tile_origins(h, tile, stride):
+        for x in _tile_origins(w, tile, stride):
+            crop = image[y:y + tile, x:x + tile]
+            tensor = torch.from_numpy(crop / 255.0).permute(2, 0, 1).float().unsqueeze(0).to(device)
+            probs = F.softmax(model(tensor), dim=1)[0].permute(1, 2, 0).cpu().numpy()
+            if prob_sum is None:
+                prob_sum = np.zeros((h, w, probs.shape[-1]), dtype=np.float32)
+            prob_sum[y:y + crop.shape[0], x:x + crop.shape[1]] += probs
+            weight[y:y + crop.shape[0], x:x + crop.shape[1]] += 1.0
+
+    return prob_sum / weight[..., None]
+
+
+def run_2d_segmentation(model: torch.nn.Module, images: list[np.ndarray], device: str = "cuda",
+                         tile: int = 512, overlap: float = 0.25) -> list[np.ndarray]:
     """Runs the trained 2D model over a batch of RGB frames, returns per-frame
     softmax class-probability maps (H, W, num_classes) for backprojection.
+    `tile` should match the resolution the model was trained at (cfg["data"]["image_size"]).
     """
     model.eval()
-    outputs = []
-    for image in images:
-        tensor = torch.from_numpy(image / 255.0).permute(2, 0, 1).float().unsqueeze(0).to(device)
-        logits = model(tensor)
-        probs = F.softmax(logits, dim=1)[0].permute(1, 2, 0).cpu().numpy()
-        outputs.append(probs)
-    return outputs
+    return [_predict_tiled(model, image, device, tile, overlap) for image in images]
 
 
 def run_pipeline(model: torch.nn.Module, images: list[np.ndarray], cameras_raw: list[dict],
@@ -45,7 +81,7 @@ def run_pipeline(model: torch.nn.Module, images: list[np.ndarray], cameras_raw: 
     aligned 1:1 with `images` (see docs/architecture.md Stage 2 for how these are
     sourced -- LiDAR-flight direct georeferencing, or COLMAP for RGB-only flights).
     """
-    class_probs = run_2d_segmentation(model, images, device)
+    class_probs = run_2d_segmentation(model, images, device, tile=cfg["data"]["image_size"][0])
 
     cameras = [
         CameraPose(K=c["K"], R=c["R"], t=c["t"], depth_map=c["depth_map"], class_probs=probs)

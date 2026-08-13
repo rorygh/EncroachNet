@@ -13,3 +13,4 @@ data/
 *.egg-info/
 .env
 .claude/
+*.log

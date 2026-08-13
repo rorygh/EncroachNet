@@ -86,13 +86,19 @@ Potentially useful (RGB-D + explicit powerline class), but two open questions be
 
 | Property | Value |
 |---|---|
-| Images | 1,100 @ 3,840×2,160 |
+| Images | 1,234 @ 3,840×2,160 (905/109/220 train/val/test) |
 | Instances | 8,987 manually labeled (towers + power lines) |
 | Labels | Supports detection, semantic segmentation, and instance segmentation |
-| Classes | Transmission towers, power lines (cables) |
+| Classes | 5 raw: `cable`, `tower_lattice`, `tower_wooden`, `tower_tucohy` (tubular/concrete/hybrid poles), `void` (ambiguous, excluded from eval/loss) — no subdivision of cable into conductor vs. static wire |
+| Format | Polygon annotations (LabelMe-style JSON / Supervisely format), **not raster masks** — rasterize before use (`scripts/prepare_ttpla.py`) |
+| License | Apache 2.0 — permissive, no noncommercial restriction (unlike DDOS) |
 | Depth/3D | **None.** Single 2D images with polygon (LabelMe) instance masks only — no depth maps, no multi-view overlap, no camera poses. Not usable for photogrammetry/ODM; not usable to validate the backprojection stage. |
 
-The largest public dataset with pixel-level power-line labels at reasonable scale, but 2D-only. No vegetation class — merge with a vegetation-labeled dataset (or use VEPL/DDOS directly, above) under a unified taxonomy (see Data Strategy).
+The largest public dataset with pixel-level power-line labels at reasonable scale, but 2D-only. No vegetation class — merge with a vegetation-labeled dataset (or use VEPL/DDOS directly, above) under a unified taxonomy (see Data Strategy). Official Google Drive download frequently hits Google's per-file quota ("too many users have viewed or downloaded this file"); `scripts/download_datasets.sh` uses the [Dataset Ninja Supervisely-format mirror](https://datasetninja.com/ttpla) instead, which isn't gated.
+
+**Benchmark results on TTPLA** (cable-only binary segmentation is the de facto standard eval — most follow-on papers drop the tower classes and instance-segmentation task entirely; see `docs/sota.md` Part A for the full comparison table and per-paper architecture notes). Notably, DUFormer's comparison table reports **SegFormer-B2 at 71.59% IoU** on TTPLA cable segmentation; `configs/default.json` initially trained that exact backbone, then switched to HRNetV2 (`hrnet_w32`) specifically to compare against it — see the HRNet-OCR row in the same table, and `docs/sota.md`'s takeaway on why.
+
+**Native resolution matters for training too, not just inference**: TTPLA ships full 3,840×2,160 frames, not pre-tessellated tiles like VEPL. `core/dataset2d.py`'s `SegmentationDataset` used to resize the whole frame down to `image_size` (512×512) for every source — for TTPLA that meant squashing a 16:9 frame into a 1:1 square while shrinking already-thin wires ~7.5× before the model ever saw them. Fixed to crop natively (random crop while training, deterministic center crop for validation) whenever the source image is at least as large as `image_size`, only falling back to resize-up for sources smaller than the target (VEPL's 256×256 tessellated tiles). This also keeps training scale consistent with `core/inference3d.py`'s tiled inference, which runs the model over native-scale windows.
 
 ### InsPLAD — Component/Defect Inspection
 **Paper:** *"InsPLAD: A Dataset and Benchmark for Power Line Asset Inspection in UAV Images"* ([arXiv 2311.01619](https://arxiv.org/abs/2311.01619))

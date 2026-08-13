@@ -20,13 +20,15 @@ _BG, _VEG, _PL, _TOWER = (CLASS_NAMES.index(n) for n in ["background", "vegetati
 
 # Per-source-dataset remap: {source_raw_id: unified_class_id}. IGNORE_INDEX drops a
 # source class entirely (e.g. UAVid's "car"/"human" are irrelevant clutter here).
-SOURCE_LABEL_MAPS: dict[str, dict[int, int]] = {
+SOURCE_LABEL_MAPS: dict[str, dict] = {
     "vepl": {
-        # VEPL (Zenodo 7800234) ships {vegetation, powerline, background} masks --
-        # exact raw pixel ids TBD from the downloaded mask files, verify before use.
-        0: _BG,
-        1: _VEG,
-        2: _PL,
+        # VEPL (Zenodo 7800234) MASK/*.png tiles are RGB color-coded, not integer
+        # ids. Verified by scanning all 532 TESELLATED_WITHOUT_AUGMENTATION masks:
+        # (0,0,0)=46.7% background, (0,255,0)=50.0% vegetation, (110,110,110)=3.3%
+        # powerline -- the 3.3% matches the documented ~1-5% wire-pixel fraction.
+        (0, 0, 0): _BG,
+        (0, 255, 0): _VEG,
+        (110, 110, 110): _PL,
     },
     "ddos": {
         # DDOS (huggingface.co/datasets/benediktkol/DDOS) semantic classes, in the
@@ -46,9 +48,16 @@ SOURCE_LABEL_MAPS: dict[str, dict[int, int]] = {
         9: _BG,           # background
     },
     "ttpla": {
+        # TTPLA ships polygon annotations (5 classes: cable, tower_lattice,
+        # tower_wooden, tower_tucohy, void), not raster masks -- rasterized to
+        # these raw ids by scripts/prepare_ttpla.py (see RAW_CLASS_IDS there).
+        # Confirmed via the dataset's meta.json (Dataset Ninja mirror).
         0: _BG,
-        1: _TOWER,
-        2: _PL,
+        1: _PL,       # cable
+        2: _TOWER,    # tower_lattice
+        3: _TOWER,    # tower_wooden
+        4: _TOWER,    # tower_tucohy
+        5: IGNORE_INDEX,  # void
     },
     "uavid": {
         0: _BG,       # building
@@ -121,7 +130,38 @@ class SegmentationDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_paths)
 
+    def _crop_or_resize(self, image: np.ndarray, raw_mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Sources larger than image_size (e.g. TTPLA's 3840x2160) get cropped, not
+        resized -- resizing a whole frame down would both distort aspect ratio and
+        shrink already-thin wires well below the pixel scale the model can represent
+        (see docs/architecture.md / the thick-wire-prediction discussion). Cropping
+        also keeps training scale consistent with core/inference3d.py's tiled
+        inference, which runs the model over native-scale image_size windows.
+        Sources already at or below image_size (e.g. VEPL's 256x256 tiles) still get
+        resized up, as before -- there's no native-scale crop to take.
+        """
+        th, tw = self.image_size
+        h, w = image.shape[:2]
+        if h < th or w < tw:
+            image = cv2.resize(image, self.image_size[::-1], interpolation=cv2.INTER_LINEAR)
+            raw_mask = cv2.resize(raw_mask, self.image_size[::-1], interpolation=cv2.INTER_NEAREST)
+            return image, raw_mask
+
+        if self.augment:
+            y, x = np.random.randint(0, h - th + 1), np.random.randint(0, w - tw + 1)
+        else:
+            y, x = (h - th) // 2, (w - tw) // 2  # deterministic for stable val metrics across epochs
+        return image[y:y + th, x:x + tw], raw_mask[y:y + th, x:x + tw]
+
     def _remap_mask(self, raw_mask: np.ndarray) -> np.ndarray:
+        if raw_mask.ndim == 3:
+            # RGB color-coded mask (e.g. VEPL) -- keys in label_map are (R, G, B) tuples.
+            remapped = np.full(raw_mask.shape[:2], fill_value=IGNORE_INDEX, dtype=np.int64)
+            for color, dst_id in self.label_map.items():
+                match = np.all(raw_mask == np.array(color, dtype=raw_mask.dtype), axis=-1)
+                remapped[match] = dst_id
+            return remapped
+
         remapped = np.full_like(raw_mask, fill_value=IGNORE_INDEX, dtype=np.int64)
         for src_id, dst_id in self.label_map.items():
             remapped[raw_mask == src_id] = dst_id
@@ -134,8 +174,7 @@ class SegmentationDataset(Dataset):
         image = cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB)
         raw_mask = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
 
-        image = cv2.resize(image, self.image_size[::-1], interpolation=cv2.INTER_LINEAR)
-        raw_mask = cv2.resize(raw_mask, self.image_size[::-1], interpolation=cv2.INTER_NEAREST)
+        image, raw_mask = self._crop_or_resize(image, raw_mask)
 
         mask = self._remap_mask(raw_mask)
 

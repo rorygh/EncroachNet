@@ -60,10 +60,9 @@ RGB images
 
 ```bash
 bash setup-env.sh
-conda activate encroachnet
 ```
 
-Requires CUDA 12.4.
+Installs into system Python via `uv` (no conda on the RunPod base image). Requires CUDA 12.4.
 
 ### RunPod / Docker
 
@@ -131,7 +130,7 @@ EncroachNet/
 ├── train2d.py             2D segmentation training entry point
 ├── infer3d.py              Full pipeline: images + poses → labeled 3D + risk report
 ├── finetune2d.py           Fine-tune on client imagery
-├── setup-env.sh            Conda environment bootstrap
+├── setup-env.sh            uv-based environment bootstrap
 ├── Dockerfile.runpod       RunPod deployment
 ├── configs/
 │   └── default.json        Hyperparameters
@@ -142,6 +141,9 @@ EncroachNet/
 │   ├── backproject.py        Multi-view 2D→3D label fusion
 │   ├── catenary.py           Conductor curve fitting + clearance computation
 │   └── inference3d.py        End-to-end pipeline orchestration
+├── scripts/
+│   ├── download_datasets.sh  Dataset download (run on RunPod, not locally)
+│   └── prepare_ttpla.py      Rasterizes TTPLA's polygon annotations to mask PNGs
 └── docs/
     ├── architecture.md       Full pipeline math
     ├── sota.md                Model survey
