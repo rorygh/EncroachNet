@@ -75,11 +75,15 @@ Two supported paths, selected per-flight based on what's available:
 
 **Path A — LiDAR-coregistered RGB** (Wingtra+Hesai style, matching Softgrove's existing data): camera poses come from onboard PPK/RTK + IMU direct georeferencing (no SfM needed); 3D points are the existing LiDAR point cloud. Preferred when available — LiDAR is denser and geometrically more accurate on non-wire surfaces than photogrammetric MVS, and wire points (however sparse) are still real 3D returns rather than MVS-hallucinated surface fill.
 
-**Path B — RGB-only**: run SfM/MVS via COLMAP (reusing the existing pipeline at `C:\rory\scripts\LogMotion`: `01_extract_frames.py` → `02_colmap_sparse.py` → `03_dense.py`) to solve camera poses and produce a dense point cloud. Expect MVS to poorly reconstruct or entirely omit wire points (thin, low-texture, often sub-pixel) — this is exactly why Stage 4's catenary fit does not trust raw point density and instead fits a parametric model through whatever sparse/noisy wire points do exist.
+**Path B — RGB-only**: run [OpenDroneMap (ODM)](https://github.com/OpenDroneMap/ODM) rather than hand-chaining raw COLMAP. ODM is purpose-built for exactly this kind of multi-image drone-corridor capture — its pipeline is OpenSfM (poses) → OpenMVS (dense reconstruction/depth maps) → orthophoto/DSM — whereas the COLMAP pipeline already on disk at `C:\rory\scripts\LogMotion` (`01_extract_frames.py` → `02_colmap_sparse.py` → `03_dense.py`) has only been exercised on video/ground-level scenes and would need adaptation for aerial multi-view geometry. ODM exposes both artifacts Stage 3 needs directly: `shots.geojson` (per-image position + orientation → `R, t`) and per-image OpenMVS depth maps (→ `depth_map` in `core/backproject.py`'s `CameraPose`). It also produces an orthomosaic/DSM as a byproduct, which folds the earlier "pre-built orthomosaic + DSM" option into the same tool rather than a separate path. Expect MVS (via either tool) to poorly reconstruct or entirely omit wire points (thin, low-texture, often sub-pixel) — this is exactly why Stage 5's catenary fit does not trust raw point density and instead fits a parametric model through whatever sparse/noisy wire points do exist.
 
 ---
 
-## Stage 3: Multi-View Backprojection
+> **⚠ NEEDS REVIEW — Stage 3 onward.** Everything from here down (multi-view backprojection, optional 3D refinement, catenary fitting, clearance computation) is candidate design, not yet confirmed. Flagging per Rory's request before picking this back up.
+
+---
+
+## Stage 3: Multi-View Backprojection  ⚠ NEEDS REVIEW
 
 For each 3D point `x_i` and each camera `k` with pose `(K_k, R_k, t_k)`:
 
@@ -108,13 +112,13 @@ Points with no visible camera (`Σ_k visible(i,k) = 0`) are left unlabeled and e
 
 ---
 
-## Stage 4 (Optional): Sparse 3D Refinement
+## Stage 4 (Optional): Sparse 3D Refinement  ⚠ NEEDS REVIEW
 
 The backprojected labels `ŷ_i` are noisy at object boundaries (projection/calibration error, imperfect visibility checks) and sparse where camera coverage is poor. A lightweight sparse-convolution U-Net (same architecture pattern as Softgrove's and SimpleUNet's backbones — voxelize, encode, decode, per-point classification head) can be trained against these pseudo-labels to smooth predictions using local 3D geometric consistency, following 2D3DNet's third stage. This does not change the label taxonomy, only cleans it.
 
 ---
 
-## Stage 5: Catenary Fitting
+## Stage 5: Catenary Fitting  ⚠ NEEDS REVIEW
 
 Conductors sag as a catenary between towers:
 
@@ -136,7 +140,7 @@ where `s` is horizontal distance along the span's principal direction, `a` is th
 
 ---
 
-## Stage 6: Clearance / Encroachment-Risk Computation
+## Stage 6: Clearance / Encroachment-Risk Computation  ⚠ NEEDS REVIEW
 
 For each labeled vegetation point `x_i` (or per-tree-crown cluster centroid, if a LiDAR channel with usable crown structure is present — reuse Softgrove's tree-top/instance clustering rather than reimplementing):
 
