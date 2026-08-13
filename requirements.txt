@@ -1,0 +1,15 @@
+torch
+torchvision
+pytorch-lightning
+tensorboard
+numpy
+scipy
+opencv-python
+transformers
+timm
+laspy[lazrs]
+open3d
+pycolmap
+scikit-image
+scikit-learn
+tqdm

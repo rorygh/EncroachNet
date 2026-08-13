@@ -1,0 +1,48 @@
+{
+  "data": {
+    "root": "/workspace/data/encroachnet",
+    "image_size": [1024, 1024],
+    "val_fraction": 0.15,
+    "num_workers": 8
+  },
+  "model2d": {
+    "backbone": "segformer_b2",
+    "pretrained": true,
+    "num_classes": 4,
+    "in_channels": 3
+  },
+  "loss": {
+    "focal_alpha": [0.05, 0.25, 0.6, 0.4],
+    "focal_gamma": 2.0,
+    "dice_weight": 1.0,
+    "topo_weight": 0.5,
+    "topo_class": "powerline"
+  },
+  "backproject": {
+    "visibility_eps": 0.05,
+    "min_views": 2,
+    "confidence_threshold": 0.3
+  },
+  "refinement3d": {
+    "enabled": false,
+    "voxel_size": 0.1,
+    "nplanes": [32, 64, 128]
+  },
+  "catenary": {
+    "min_points_per_span": 20,
+    "cluster_eps": 1.0
+  },
+  "clearance": {
+    "mvcd_meters": 3.0
+  },
+  "training": {
+    "batch_size": 8,
+    "max_epochs": 150,
+    "learning_rate": 0.0001,
+    "weight_decay": 1e-5,
+    "gradient_clip_val": 1.0,
+    "mixed_precision": true,
+    "checkpoint_metric": "val/loss",
+    "checkpoint_mode": "min"
+  }
+}

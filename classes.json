@@ -1,0 +1,8 @@
+{
+  "ignore_index": -1,
+  "semantic": {
+    "num_classes": 4,
+    "class_names": ["background", "vegetation", "powerline", "tower"],
+    "class_colors": ["#8a8a8a", "#3ab84a", "#ff4444", "#4a6fc8"]
+  }
+}

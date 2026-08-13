@@ -1,0 +1,17 @@
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+
+WORKDIR /workspace/EncroachNet
+
+# Install uv for fast installs
+RUN pip install uv
+
+# Copy and install dependencies
+COPY requirements.txt .
+RUN uv pip install --system spconv-cu124
+RUN uv pip install --system -r requirements.txt
+
+# Copy source
+COPY . .
+
+# Default: drop into bash; training/inference launched manually
+CMD ["/bin/bash"]
