@@ -12,4 +12,5 @@ open3d
 pycolmap
 scikit-image
 scikit-learn
+huggingface_hub
 tqdm

@@ -6,15 +6,79 @@ Last updated: August 2026
 
 ---
 
-## The Core Gap
+## Correction: The Combined Dataset Gap Is Smaller Than Initially Assessed
 
-**No public dataset labels power lines and vegetation together in the same aerial scene.** Powerline-specific datasets (TTPLA, InsPLAD, CPLID) do not label vegetation at all; vegetation/land-cover aerial datasets (UAVid, Semantic Drone, VDD) do not label power lines. Every existing published powerline-detection-for-vegetation-management system (e.g. the YOLO-OBB paper in `docs/sota.md`) works around this by running a powerline detector and a generic "clutter near the line" heuristic rather than a true joint-taxonomy segmentation model.
+The first pass of this survey concluded that no dataset labels power lines and vegetation together. That was wrong — a second, more targeted search turned up two datasets that directly close this gap, at different scales and for different purposes:
 
-This means EncroachNet's data strategy has to be constructed, not simply downloaded — see **Data Strategy** below.
+- **[VEPL](https://zenodo.org/records/7800234)** — a small, real, public, purpose-built dataset: drone orthomosaics of an actual power-line corridor in Colombia, labeled exactly `{vegetation, powerline, background}`, **and it ships DSMs alongside the orthomosaics** — i.e. real labeled 2D data with real paired 3D geometry, no photogrammetry run required to test the orthomosaic+DSM lift path.
+- **[DDOS](https://huggingface.co/datasets/benediktkol/DDOS)** — a large synthetic (AirSim) dataset whose "small suburban town" environment explicitly includes "dense trees and numerous power lines" in the same scenes, with full RGB + depth + per-pixel segmentation ground truth for every frame of 300 training / 20 val / 20 test **10 Hz flight sequences**.
+
+Both are detailed below. The older powerline-only (TTPLA, InsPLAD) and vegetation-only (UAVid, Semantic Drone, VDD) datasets are still useful for scale and diversity once VEPL's ~2.4 km / single-geography footprint is outgrown, but they're no longer the only option — see **Data Strategy** below for how all of these fit together.
 
 ---
 
-## Stage 1: Powerline-Specific 2D Datasets
+## ★ Combined Powerline + Vegetation Datasets
+
+### VEPL — Primary Real-World Target-Taxonomy Dataset ★
+**Papers:** dataset paper ([ResearchGate](https://www.researchgate.net/publication/372931199_VEPL_Dataset_A_Vegetation_Encroachment_in_Power_Line_Corridors_Dataset_for_Semantic_Segmentation_of_Drone_Aerial_Orthomosaics)); companion model paper, [VEPL-Net](https://www.mdpi.com/2220-9964/12/11/454) (*ISPRS Int. J. Geo-Information*, 2023)
+**Data:** https://doi.org/10.5281/zenodo.7800234 — CC BY 4.0, publicly downloadable
+
+| Property | Value |
+|---|---|
+| Classes | Exactly EncroachNet's target taxonomy minus `tower`: `vegetation`, `powerline`, `background` |
+| Coverage | ~2.4 km of drone flights along a secondary road, Envigado, Colombia |
+| Contents | 4 full-size orthomosaics + masks **+ DSMs** (digital surface models), plus tessellated chunk sets: 532 base image/mask pairs, 3,724 with geometric augmentation, 3,192 with spectral augmentation |
+
+This is the dataset EncroachNet's whole taxonomy was designed around, and it exists. Two important caveats: (1) it's built from **stitched orthomosaics, not raw source frames** — no per-image camera poses are provided, so it can validate the orthomosaic+DSM 2D→3D lift path directly (`docs/architecture.md` Stage 2) but not the multi-view backprojection path, since there's no multi-view redundancy left after stitching; (2) single geography / ~2.4 km — real signal, but not enough scale or diversity on its own to be the whole training set. Use it as the primary fine-tuning/validation set in the already-correct taxonomy, supplemented by the larger single-class datasets below for pretraining scale.
+
+### DDOS — Synthetic Multi-View Flight Sequences with Depth ★
+**Paper:** Kolbeinsson, *"DDOS: The Drone Depth and Obstacle Segmentation Dataset"* ([arXiv 2312.12494](https://arxiv.org/abs/2312.12494), CVPRW 2024)
+**Data:** https://huggingface.co/datasets/benediktkol/DDOS — publicly downloadable
+
+| Property | Value |
+|---|---|
+| Generation | Synthetic, AirSim (Unreal Engine) |
+| Environments | "Small suburban town" (**dense trees and numerous power lines**, residential) and a park setting (football field, floodlights, dense trees, office buildings) |
+| Sequences | 300 train / 20 val / 20 test **flights**, each a continuous 10 Hz, 10-second trajectory (~100 frames/flight) |
+| Per-frame data | RGB, depth map, pixel-wise semantic segmentation, optical flow, surface normals |
+| Classes | 10: Animals, Vehicles, Buildings, **Trees**, Large Mesh, Small Mesh, **Thin Structures**, **Ultra-thin**, Other, Background |
+
+This directly answers "is there a simulated drone dataset we could run ODM on": yes — DDOS's flights are genuine sequential multi-view trajectories (not single stills), so its RGB frames can be fed straight into ODM to reconstruct camera poses + geometry, **and then checked against DDOS's own ground-truth depth/pose** as a correctness test for the whole Stage 2→3 pipeline before ever touching real data. It also directly supplies the `{vegetation≈Trees, powerline≈Thin Structures/Ultra-thin, background}` remap needed for 2D pretraining, at far larger scale than VEPL (30k+ frames vs. ~500 base VEPL chunks), and unlike a from-scratch synthetic renderer, it's already built and public.
+
+**Why this replaces building a from-scratch synthetic corridor renderer:** DDOS already covers the case a bespoke Blender/SynthBlend-style corridor generator would have been built for (towers/wires + trees in a controllable synthetic scene, with GT labels) — no need to build and maintain that ourselves.
+
+---
+
+## RGB-D / Depth-Equipped Powerline Datasets (Real)
+
+Useful specifically for validating `core/backproject.py`'s visibility-check math against real sensor depth, without running photogrammetry at all.
+
+### TL-RGBD — Component/Defect Focus, Real Depth Sensor
+Real data captured by **China Southern Power Grid** UAVs with synchronized RGB + depth sensors.
+
+| Property | Value |
+|---|---|
+| Image pairs | 10,000 paired RGB + depth |
+| Instances | 73,448 annotated, across 9 component/defect states (insulators, tie wires, poles, flashover, bird's nests, etc.) |
+| Object size | 94.5% of instances are small objects (<32² px) |
+
+Component/defect-level (like InsPLAD), not corridor/vegetation segmentation — relevant here mainly as a real RGB-D validation source, not primary training data. Access/download details not confirmed publicly; check the citing paper ([arXiv 2602.01696](https://arxiv.org/html/2602.01696)) for a data-availability statement.
+
+### APSD (AirSim Power System Dataset) — Synthetic RGB-D, Access Unconfirmed
+Chao et al., Fujian Institute of Research on the Structure of Matter (CAS), published in *Pattern Recognition*, June 2026. Referenced by Rory: [CAS news writeup](https://english.cas.cn/newsroom/research-news/202606/t20260604_1161124.shtml).
+
+| Property | Value |
+|---|---|
+| Generation | Synthetic, AirSim |
+| Image pairs | 4,000+ RGB-D |
+| Classes | Power lines, power poles, street lights, traffic lights |
+| Scenes | Multiple simulated urban and industrial environments |
+
+Potentially useful (RGB-D + explicit powerline class), but two open questions before relying on it: (1) the class mix (poles/streetlights/traffic lights alongside power lines) suggests this may be a lower-altitude urban-infrastructure simulation rather than a high-voltage transmission-corridor flight — worth confirming the camera platform/altitude before assuming it transfers to Wingtra-style corridor imagery; (2) no public download link found — the paper states the dataset was built for their M3WaveGNet RGB-D segmentation framework, so access likely requires contacting the lead author (jchao@fjirsm.ac.cn) or checking the *Pattern Recognition* paper's data-availability statement directly.
+
+---
+
+## Stage 1: Powerline-Specific 2D Datasets (Scale/Diversity Supplement)
 
 ### TTPLA — Primary Powerline/Tower Source ★
 **Paper:** Abdelfattah et al., *"TTPLA: An Aerial-Image Dataset for Detection and Segmentation of Transmission Towers and Power Lines"* ([arXiv 2010.10032](https://arxiv.org/abs/2010.10032))
@@ -26,8 +90,9 @@ This means EncroachNet's data strategy has to be constructed, not simply downloa
 | Instances | 8,987 manually labeled (towers + power lines) |
 | Labels | Supports detection, semantic segmentation, and instance segmentation |
 | Classes | Transmission towers, power lines (cables) |
+| Depth/3D | **None.** Single 2D images with polygon (LabelMe) instance masks only — no depth maps, no multi-view overlap, no camera poses. Not usable for photogrammetry/ODM; not usable to validate the backprojection stage. |
 
-The only major public dataset with pixel-level power-line labels at reasonable scale. No vegetation class — will need to be merged with a vegetation-labeled dataset under a unified taxonomy (see Data Strategy).
+The largest public dataset with pixel-level power-line labels at reasonable scale, but 2D-only. No vegetation class — merge with a vegetation-labeled dataset (or use VEPL/DDOS directly, above) under a unified taxonomy (see Data Strategy).
 
 ### InsPLAD — Component/Defect Inspection
 **Paper:** *"InsPLAD: A Dataset and Benchmark for Power Line Asset Inspection in UAV Images"* ([arXiv 2311.01619](https://arxiv.org/abs/2311.01619))
@@ -96,30 +161,27 @@ No single standard public benchmark dataset was identified for powerline-corrido
 
 ---
 
-## Synthetic Data Precedent
-
-No public dataset combines powerline + vegetation at corridor scale, but synthetic generation is well-precedented for the powerline class specifically: synthetic high-voltage insulator image datasets have been built by importing public CAD models of towers/insulators into game engines, varying camera pose/lighting/background, with **automatic ground-truth mask generation** via color-keyed rendering. This validates that thin metallic wire/tower structures render and label cleanly in a synthetic pipeline — the same logic already proven for Rory's own work:
-
-- **Boreal3D** (used in Softgrove) — synthetic forest LiDAR pretraining, pretrain-then-finetune-on-20%-real matches full-real-data performance.
-- **SynthBlend** (`C:\rory\scripts\aerosynth\SimpleUNet`) — Rory's own existing synthetic RGB/point-cloud render pipeline (Blender/GTA-V based), already used for 3D semantic segmentation pretraining.
-
-EncroachNet can plausibly follow the same recipe: procedurally place towers, catenary-curved wires, and tree/vegetation models in a 3D scene (Blender), render RGB + depth + per-pixel semantic masks from realistic UAV corridor-flight camera trajectories, and use this as Stage 0 pretraining data before merged-real-dataset pretraining and client fine-tuning.
-
----
-
 ## Data Strategy (Recommended Multi-Stage Pipeline)
 
+No from-scratch synthetic data generation (no in-house Blender/SynthBlend-style corridor renderer) — **DDOS already covers that role** with public, pre-built synthetic flights containing both target classes plus ground-truth depth. Real work goes into the stages below instead:
+
 ```
-Stage 0 — Synthetic corridor pretraining (optional but recommended)
-  → Procedurally rendered towers + catenary wires + trees (Blender), following
-    the SynthBlend/Boreal3D precedent already validated for Rory's other projects
+Stage 1 — Synthetic pretraining + pipeline validation
+  → DDOS (public, AirSim): {Trees -> vegetation, Thin Structures/Ultra-thin -> powerline,
+    everything else -> background}. Large scale (30k+ frames), sequential multi-view
+    flights -- also the dataset to validate core/backproject.py and the ODM path against,
+    since GT depth/segmentation is known for every frame.
 
-Stage 1 — Merged-taxonomy real-data pretraining
+Stage 2 — Real combined-taxonomy fine-tuning
+  → VEPL (public, real): already in the exact target taxonomy. Small (~2.4 km,
+    single geography) but zero label-remapping needed, and the DSM lets the
+    orthomosaic+DSM lift path (docs/architecture.md Stage 2) be tested on real data.
+
+Stage 3 — Merged-taxonomy scale/diversity supplement (optional, if Stage 1+2 underperform)
   → TTPLA (powerline/tower classes) + UAVid / Semantic Drone / VDD (vegetation
-    classes), remapped to a shared label space: {background, vegetation, powerline}
-    (+ optionally tower, as a 4th class, since TTPLA already labels it)
+    classes), remapped to the shared label space (see table below)
 
-Stage 2 — Domain adaptation to client corridor imagery
+Stage 4 — Domain adaptation to client corridor imagery
   → Fine-tune on real client drone RGB once available, following the same
     sparse-label fine-tuning precedent already validated for Softgrove
     (finetune.py; TreeLite3D's "1 annotated tree" result — see Softgrove's
@@ -128,12 +190,12 @@ Stage 2 — Domain adaptation to client corridor imagery
 
 ### Label-space merging notes
 
-| Unified class | TTPLA | UAVid | Semantic Drone | VDD |
-|---|---|---|---|---|
-| `background` | (implicit) | building, road, car, human, background | paved area, roof, wall, etc. | scene-dependent |
-| `vegetation` | — | tree, low vegetation | tree, vegetation, grass | tree/vegetation classes |
-| `powerline` | power lines | — | — | — |
-| `tower` (optional 4th class) | transmission towers | — | — | — |
+| Unified class | DDOS | VEPL | TTPLA | UAVid | Semantic Drone | VDD |
+|---|---|---|---|---|---|---|
+| `background` | Animals, Vehicles, Buildings, Large/Small Mesh, Other, Background | background | (implicit) | building, road, car, human, background | paved area, roof, wall, etc. | scene-dependent |
+| `vegetation` | Trees | vegetation | — | tree, low vegetation | tree, vegetation, grass | tree/vegetation classes |
+| `powerline` | Thin Structures, Ultra-thin | powerline | power lines | — | — | — |
+| `tower` (optional 4th class) | — | — | transmission towers | — | — | — |
 
 ### Format notes
 

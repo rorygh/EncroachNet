@@ -103,13 +103,14 @@ python finetune2d.py \
 
 ## Training Data
 
-No public dataset labels power lines and vegetation together — see [docs/datasets.md](docs/datasets.md) for the full survey and the multi-stage merged-taxonomy strategy:
+Two datasets close most of the "no one labels both classes together" gap — see [docs/datasets.md](docs/datasets.md) for the full survey and multi-stage strategy:
 
 | Stage | Purpose | Datasets |
 |-------|---------|----------|
-| 0 (optional) | Synthetic corridor pretraining | Procedurally rendered towers/wires/trees (Blender), following the SynthBlend/Boreal3D precedent |
-| 1 | Merged-taxonomy real-data pretraining | [TTPLA](https://arxiv.org/abs/2010.10032) (powerline/tower) + [UAVid](https://arxiv.org/pdf/2109.08937) / Semantic Drone Dataset / VDD (vegetation) |
-| 2 | Domain adaptation | Fine-tune on real client drone imagery once available |
+| 1 | Synthetic pretraining + pipeline validation | [DDOS](https://huggingface.co/datasets/benediktkol/DDOS) (public, AirSim-simulated flights with trees + power lines + GT depth — also used to validate the ODM/backprojection path) |
+| 2 | Real combined-taxonomy fine-tuning | [VEPL](https://zenodo.org/records/7800234) (public, real drone corridor imagery, already in the exact `{vegetation, powerline, background}` taxonomy, ships with DSMs) |
+| 3 (optional) | Scale/diversity supplement | [TTPLA](https://arxiv.org/abs/2010.10032) (powerline/tower) + [UAVid](https://arxiv.org/pdf/2109.08937) / Semantic Drone Dataset / VDD (vegetation) |
+| 4 | Domain adaptation | Fine-tune on real client drone imagery once available |
 
 ## Comparison to State of the Art
 

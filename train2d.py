@@ -5,7 +5,7 @@ Usage:
     python train2d.py --config configs/default.json
     python train2d.py --config configs/default.json --batch_size 4 --max_epochs 100
     python train2d.py --config configs/default.json --resume
-    python train2d.py --config configs/default.json --sources ttpla,uavid
+    python train2d.py --config configs/default.json --sources ddos,vepl
 """
 
 import argparse
@@ -69,7 +69,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="configs/default.json")
     p.add_argument("--resume", action="store_true")
-    p.add_argument("--sources", default="ttpla,uavid",
+    p.add_argument("--sources", default="ddos,vepl",
                     help="Comma-separated source datasets to merge (see core/dataset2d.py SOURCE_LABEL_MAPS)")
     # Inline overrides
     p.add_argument("--batch_size", type=int)

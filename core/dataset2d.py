@@ -1,9 +1,11 @@
 """2D image/mask dataset loader with merged-taxonomy remapping.
 
-No single public dataset labels both power lines and vegetation (docs/datasets.md).
-Each source dataset ships its own label ids; SOURCE_LABEL_MAPS remaps every source
-into the shared taxonomy in classes.json ({background, vegetation, powerline, tower}).
-Add an entry here per new source dataset rather than special-casing loading code.
+VEPL and DDOS (docs/datasets.md) already label power lines and vegetation
+together and are the primary sources; TTPLA/UAVid/etc. remain useful as a
+scale/diversity supplement. Each source dataset ships its own label ids;
+SOURCE_LABEL_MAPS remaps every source into the shared taxonomy in classes.json
+({background, vegetation, powerline, tower}). Add an entry here per new source
+dataset rather than special-casing loading code.
 """
 from pathlib import Path
 
@@ -19,6 +21,30 @@ _BG, _VEG, _PL, _TOWER = (CLASS_NAMES.index(n) for n in ["background", "vegetati
 # Per-source-dataset remap: {source_raw_id: unified_class_id}. IGNORE_INDEX drops a
 # source class entirely (e.g. UAVid's "car"/"human" are irrelevant clutter here).
 SOURCE_LABEL_MAPS: dict[str, dict[int, int]] = {
+    "vepl": {
+        # VEPL (Zenodo 7800234) ships {vegetation, powerline, background} masks --
+        # exact raw pixel ids TBD from the downloaded mask files, verify before use.
+        0: _BG,
+        1: _VEG,
+        2: _PL,
+    },
+    "ddos": {
+        # DDOS (huggingface.co/datasets/benediktkol/DDOS) semantic classes, in the
+        # order documented by the dataset card: Animals, Vehicles, Buildings, Trees,
+        # Large Mesh, Small Mesh, Thin Structures, Ultra-thin, Other, Background.
+        # Raw ids assumed 0-indexed in that order -- verify against the actual
+        # downloaded label files before training (dataset card / loader script).
+        0: IGNORE_INDEX,  # animals
+        1: IGNORE_INDEX,  # vehicles
+        2: _BG,           # buildings
+        3: _VEG,          # trees
+        4: _BG,           # large mesh (fences etc.)
+        5: _BG,           # small mesh
+        6: _PL,           # thin structures (wires, poles)
+        7: _PL,           # ultra-thin (finest wires)
+        8: IGNORE_INDEX,  # other
+        9: _BG,           # background
+    },
     "ttpla": {
         0: _BG,
         1: _TOWER,
@@ -35,10 +61,35 @@ SOURCE_LABEL_MAPS: dict[str, dict[int, int]] = {
         7: _BG,       # background clutter
     },
     "semantic_drone": {
-        # paved area, dirt, gravel, water, rocks, pool, roof, wall, window, door,
-        # fence, fence-pole, person, dog, car, bicycle, ar-marker, obstacle -> bg
-        # vegetation, tree, grass -> vegetation; bald-tree -> vegetation
-        # remapped programmatically at load time via class-name lookup, see below
+        # Semantic Drone Dataset (TU Graz) grayscale label ids, per the official
+        # class_dict.csv row order -- an empty dict here previously would have
+        # crashed on load (see SegmentationDataset.__init__); ids below are best
+        # recollection and MUST be verified against the actual downloaded
+        # class_dict.csv before training.
+        0: _BG,   # unlabeled
+        1: _BG,   # paved-area
+        2: _BG,   # dirt
+        3: _VEG,  # grass
+        4: _BG,   # gravel
+        5: _BG,   # water
+        6: _BG,   # rocks
+        7: _BG,   # pool
+        8: _VEG,  # vegetation
+        9: _BG,   # roof
+        10: _BG,  # wall
+        11: _BG,  # window
+        12: _BG,  # door
+        13: _BG,  # fence
+        14: _BG,  # fence-pole
+        15: IGNORE_INDEX,  # person
+        16: IGNORE_INDEX,  # dog
+        17: IGNORE_INDEX,  # car
+        18: IGNORE_INDEX,  # bicycle
+        19: _VEG,  # tree
+        20: _VEG,  # bald-tree
+        21: IGNORE_INDEX,  # ar-marker
+        22: _BG,   # obstacle
+        23: IGNORE_INDEX,  # conflicting
     },
     "client": {
         # Client-labeled masks are expected to already use the unified taxonomy

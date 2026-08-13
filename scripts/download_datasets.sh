@@ -14,13 +14,14 @@
 #   bash scripts/download_datasets.sh --datasets TTPLA,UAVid
 #
 # Dataset groups (see docs/datasets.md for the full survey):
-#   powerline  — TTPLA, InsPLAD                (powerline/tower classes)
-#   vegetation — UAVid, SemanticDrone, VDD      (vegetation classes)
-#   lidar      — DALES                          (3D-side powerline validation)
+#   combined   — VEPL, DDOS                     (primary: powerline + vegetation together)
+#   powerline  — TTPLA, InsPLAD                 (powerline/tower classes, supplement)
+#   vegetation — UAVid, SemanticDrone, VDD       (vegetation classes, supplement)
+#   lidar      — DALES                           (3D-side powerline validation)
 #   all        — all of the above (default)
 #
 # Individual dataset names (comma-separated):
-#   TTPLA, InsPLAD, UAVid, SemanticDrone, VDD, DALES
+#   VEPL, DDOS, TTPLA, InsPLAD, UAVid, SemanticDrone, VDD, DALES
 #
 # Environment variables:
 #   DATA_ROOT   Override data directory (default: /workspace/data)
@@ -67,7 +68,24 @@ zenodo_dl() {
     zenodo_get "$record_id" -o "$dest"
 }
 
-# ── Powerline datasets ────────────────────────────────────────────────────────
+# ── Combined powerline + vegetation datasets (primary) ───────────────────────
+
+if want combined || want VEPL; then
+    echo "[VEPL] Real drone corridor imagery, exact target taxonomy + DSMs — Zenodo 7800234"
+    zenodo_dl 7800234 "$DATA_ROOT/VEPL"
+    echo
+fi
+
+if want combined || want DDOS; then
+    echo "[DDOS] Synthetic AirSim flights, trees + power lines + GT depth — HuggingFace"
+    mkdir -p "$DATA_ROOT/DDOS"
+    pip install -q "huggingface_hub[cli]" 2>/dev/null || true
+    huggingface-cli download benediktkol/DDOS --repo-type dataset --local-dir "$DATA_ROOT/DDOS" || \
+        echo "  ⚠  huggingface-cli failed — see https://huggingface.co/datasets/benediktkol/DDOS for manual download."
+    echo
+fi
+
+# ── Powerline datasets (scale/diversity supplement) ───────────────────────────
 
 if want powerline || want TTPLA; then
     echo "[TTPLA] 1,100 images, 8,987 instances — transmission towers + power lines"
