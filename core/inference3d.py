@@ -35,7 +35,7 @@ def _tile_origins(size: int, tile: int, stride: int) -> list[int]:
 
 
 @torch.no_grad()
-def _predict_tiled(model: torch.nn.Module, image: np.ndarray, device: str,
+def predict_tiled(model: torch.nn.Module, image: np.ndarray, device: str,
                     tile: int, overlap: float) -> np.ndarray:
     """Full-resolution drone frames (~4000-8000px) are both too large to fit in GPU
     memory at once and too large-scale relative to what the model was trained on
@@ -72,7 +72,7 @@ def run_2d_segmentation(model: torch.nn.Module, images: list[np.ndarray], device
     `tile` should match the resolution the model was trained at (cfg["data"]["image_size"]).
     """
     model.eval()
-    return [_predict_tiled(model, image, device, tile, overlap) for image in images]
+    return [predict_tiled(model, image, device, tile, overlap) for image in images]
 
 
 def run_pipeline(model: torch.nn.Module, images: list[np.ndarray], cameras_raw: list[dict],

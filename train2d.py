@@ -14,6 +14,7 @@ import os
 
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
 import torchvision.utils as vutils
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -21,6 +22,7 @@ from torch.utils.data import ConcatDataset, DataLoader
 from torchmetrics.classification import MulticlassJaccardIndex
 
 from core.dataset2d import SegmentationDataset
+from core.inference3d import predict_tiled
 from core.losses import CombinedSegmentationLoss
 from core.model2d import build_model
 from core import CLASS_NAMES, CLASS_COLORS, IGNORE_INDEX
@@ -38,10 +40,11 @@ def _colorize_mask(mask: torch.Tensor) -> torch.Tensor:
 
 
 class EncroachNet2DModule(pl.LightningModule):
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, full_res_ref: SegmentationDataset | None = None):
         super().__init__()
         self.save_hyperparameters(cfg)
         self.cfg = cfg
+        self.full_res_ref = full_res_ref  # one fixed full-resolution val image, for tiled-inference visualization
         self.model = build_model(cfg["model2d"])
         self.criterion = CombinedSegmentationLoss(
             class_names=CLASS_NAMES,
@@ -86,6 +89,34 @@ class EncroachNet2DModule(pl.LightningModule):
             self.log(f"val/iou_{name}", iou)
         self.log("val/miou", per_class_iou.mean())
         self.val_iou.reset()
+
+        if self.full_res_ref is not None:
+            self._log_full_image_prediction()
+
+    def _log_full_image_prediction(self, max_width: int = 1536) -> None:
+        """Runs core/inference3d.py's tiled inference over one fixed full-resolution
+        val image (not the training-scale crops validation_step otherwise sees) --
+        this is the closest thing to a real deployment preview available during
+        training, since infer3d.py will run on full drone frames the same way.
+        """
+        image, mask = self.full_res_ref.get_full_resolution(0)
+        tile = self.cfg["data"]["image_size"][0]
+        probs = predict_tiled(self.model, image, str(self.device), tile=tile, overlap=0.25)
+        pred = probs.argmax(-1)
+
+        image_t = torch.from_numpy(image / 255.0).permute(2, 0, 1).float()
+        combined = torch.cat([
+            image_t,
+            _colorize_mask(torch.from_numpy(mask)),
+            _colorize_mask(torch.from_numpy(pred)),
+        ], dim=2)  # RGB | ground truth | prediction, side by side
+
+        if combined.shape[-1] > max_width:  # full drone-frame resolution is overkill for a TB thumbnail
+            scale = max_width / combined.shape[-1]
+            combined = F.interpolate(combined.unsqueeze(0), scale_factor=scale, mode="bilinear",
+                                      align_corners=False, recompute_scale_factor=False)[0]
+
+        self.logger.experiment.add_image("val/full_image_prediction", combined, self.current_epoch)
 
     def _log_val_images(self, batch: dict, logits: torch.Tensor, n: int = 4) -> None:
         preds = logits.argmax(dim=1)
@@ -162,7 +193,7 @@ def main():
     val_dl = DataLoader(val_ds, batch_size=cfg["training"]["batch_size"], shuffle=False,
                          num_workers=cfg["data"]["num_workers"])
 
-    module = EncroachNet2DModule(cfg)
+    module = EncroachNet2DModule(cfg, full_res_ref=val_ds.datasets[0])
 
     # Name runs by backbone + source datasets so different experiments log to separate
     # TensorBoard curves / checkpoint dirs but with identical metric tags -- directly comparable.

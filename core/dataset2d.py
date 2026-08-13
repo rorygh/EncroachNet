@@ -153,6 +153,17 @@ class SegmentationDataset(Dataset):
             y, x = (h - th) // 2, (w - tw) // 2  # deterministic for stable val metrics across epochs
         return image[y:y + th, x:x + tw], raw_mask[y:y + th, x:x + tw]
 
+    def get_full_resolution(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Loads image `idx` at its native resolution (no crop/resize), mask remapped
+        to the unified taxonomy -- for full-image tiled-inference visualization
+        (train2d.py), as opposed to __getitem__'s training-scale crop.
+        """
+        img_path = self.image_paths[idx]
+        mask_path = self.mask_dir / f"{img_path.stem}.png"
+        image = cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB)
+        raw_mask = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+        return image, self._remap_mask(raw_mask)
+
     def _remap_mask(self, raw_mask: np.ndarray) -> np.ndarray:
         if raw_mask.ndim == 3:
             # RGB color-coded mask (e.g. VEPL) -- keys in label_map are (R, G, B) tuples.

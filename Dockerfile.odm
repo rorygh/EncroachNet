@@ -1,0 +1,68 @@
+# Grafts OpenDroneMap onto the EncroachNet RunPod image using OpenDroneMap's own
+# published Docker image as a source of *prebuilt* binaries, instead of compiling
+# ODM's SuperBuild (OpenCV/Ceres/OpenSfM/PDAL/OpenMVS/GDAL, ~12 libraries) from
+# source ourselves. ODM's own Dockerfile (github.com/OpenDroneMap/ODM/Dockerfile)
+# confirms opendronemap/odm already ships the fully-compiled SuperBuild output at
+# /code/SuperBuild/install -- we only need to copy it across, not rebuild it.
+#
+# Why this exists: this pod's RunPod container has no Docker (no docker.sock, no
+# CAP_SYS_ADMIN) and can't run ODM's own image directly, and its container runtime
+# blocks CLONE_NEWUSER so daemonless builders (buildah, podman) can't build here
+# either -- so this file is written to be built from a machine with real Docker
+# (local machine or CI), not from inside a RunPod pod. See docs/architecture.md
+# Stage 2 for why ODM is needed (RGB-only camera pose recovery for backprojection).
+#
+# Build (from a Docker-capable host):
+#   docker build -f Dockerfile.odm -t rorygh/encroachnet-odm:latest .
+#   docker push rorygh/encroachnet-odm:latest
+# Then launch the RunPod pod FROM rorygh/encroachnet-odm:latest as its base image
+# (RunPod dashboard/API pod-creation setting) instead of the stock PyTorch image --
+# there is no way to `docker run` this image from inside an existing unprivileged
+# pod; it has to be the pod's own base image at creation time.
+
+# Pin the exact version tested against this project (docs/datasets.md, docs/sota.md);
+# bump deliberately, don't float on `latest`.
+FROM opendronemap/odm:3.6.2 AS odm
+
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+
+WORKDIR /workspace/EncroachNet
+
+# Install uv for fast installs
+RUN pip install uv
+
+# Copy and install EncroachNet's own dependencies (unchanged from Dockerfile.runpod)
+COPY requirements.txt .
+RUN uv pip install --system spconv-cu124
+RUN uv pip install --system -r requirements.txt
+
+# Bring over ODM's prebuilt tree (SuperBuild/install, its own venv, run.py, stages/,
+# configure.sh + snap/ -- kept together since configure.sh's installdepsfromsnapcraft
+# reads snap/*.yaml relative to CWD). Deliberately NOT merged onto PATH/PYTHONPATH
+# globally -- ODM's venv is built against its own compiled libs and would collide
+# with EncroachNet's system-Python training/inference environment. Invoke it
+# explicitly instead: /opt/odm/venv/bin/python3 /opt/odm/run.py --project-path ...
+COPY --from=odm /code /opt/odm
+
+# Runtime-only shared libraries ODM's compiled binaries link against (not the -dev
+# headers -- those were only needed to build SuperBuild in the odm stage, which we
+# skipped). Mirrors ODM's own final Dockerfile stage, relocated to /opt/odm.
+WORKDIR /opt/odm
+RUN bash configure.sh installruntimedepsonly \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+WORKDIR /workspace/EncroachNet
+
+ENV ODM_HOME=/opt/odm
+
+# Copy EncroachNet source
+COPY . .
+
+# TensorBoard (train2d.py logs to runs/ via TensorBoardLogger) -- expose the port here
+# for documentation; on RunPod it still needs to be added under the pod's
+# Expose HTTP Ports setting to actually be reachable.
+EXPOSE 6006
+
+# Default: drop into bash; training/inference/ODM launched manually. Run ODM via:
+#   $ODM_HOME/venv/bin/python3 $ODM_HOME/run.py --project-path /workspace/data/odm_projects myproject
+CMD ["/bin/bash"]
